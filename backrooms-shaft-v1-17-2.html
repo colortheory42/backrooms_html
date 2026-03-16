@@ -200,7 +200,7 @@ function getShaftForZone(zx, zz) {
   const z1   = z0 + SHAFT.DEPTH_CELLS  * G;
 
   // Floor band: shaft can start at any floor level (-20 to +20)
-  const floorMin = Math.floor(r4 * 40) - 20;
+  const floorMin = Math.floor(r4 * 40) - 200000;
   const floorMax = floorMin + SHAFT.FLOOR_COUNT - 1;
 
   const shaft = { x0, z0, x1, z1, floorMin, floorMax };
