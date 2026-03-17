@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>BACKROOMS — Acoustic Survey Generator</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a08;
+    color: #c8bc7a;
+    font-family: 'Courier New', monospace;
+    min-height: 100vh;
+    padding: 40px 20px;
+  }
+  h1 {
+    font-size: 1.1rem;
+    letter-spacing: 0.4em;
+    color: #f0e060;
+    text-shadow: 0 0 30px #f0e06044;
+    margin-bottom: 0.3rem;
+  }
+  .subtitle {
+    font-size: 0.7rem;
+    color: #555;
+    letter-spacing: 0.2em;
+    margin-bottom: 3rem;
+  }
+  .floors {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    max-width: 700px;
+  }
+  .floor-row {
+    display: grid;
+    grid-template-columns: 120px 1fr 140px 100px;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 16px;
+    background: #0f0f0c;
+    border-left: 2px solid #1a1a14;
+    transition: border-color 0.2s;
+  }
+  .floor-row:hover { border-color: #f0e06044; }
+  .floor-row.rendering { border-color: #f0e060; background: #141410; }
+  .floor-row.done { border-color: #40a060; }
+  .floor-label {
+    font-size: 0.75rem;
+    color: #f0e060;
+    letter-spacing: 0.15em;
+  }
+  .floor-desc {
+    font-size: 0.65rem;
+    color: #666;
+    line-height: 1.5;
+  }
+  .floor-desc span { color: #888; }
+  .duration-select {
+    background: #1a1a14;
+    border: 1px solid #333;
+    color: #c8bc7a;
+    font-family: 'Courier New', monospace;
+    font-size: 0.7rem;
+    padding: 4px 8px;
+    cursor: pointer;
+    width: 100%;
+  }
+  .render-btn {
+    background: none;
+    border: 1px solid #333;
+    color: #888;
+    font-family: 'Courier New', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    padding: 6px 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    width: 100%;
+  }
+  .render-btn:hover { border-color: #f0e060; color: #f0e060; }
+  .render-btn:disabled { opacity: 0.3; cursor: default; }
+  .render-btn.done { border-color: #40a060; color: #40a060; }
+  .progress-bar {
+    grid-column: 1 / -1;
+    height: 2px;
+    background: #1a1a14;
+    display: none;
+  }
+  .progress-bar.visible { display: block; }
+  .progress-fill {
+    height: 100%;
+    background: #f0e060;
+    width: 0%;
+    transition: width 0.1s;
+  }
+  .render-all-btn {
+    margin-top: 2rem;
+    background: none;
+    border: 1px solid #f0e06066;
+    color: #f0e060;
+    font-family: 'Courier New', monospace;
+    font-size: 0.75rem;
+    letter-spacing: 0.2em;
+    padding: 12px 32px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .render-all-btn:hover { background: #f0e06011; }
+  .render-all-btn:disabled { opacity: 0.3; cursor: default; }
+  .log {
+    margin-top: 2rem;
+    max-width: 700px;
+    font-size: 0.65rem;
+    color: #444;
+    line-height: 1.8;
+    letter-spacing: 0.05em;
+  }
+  .log .entry { color: #666; }
+  .log .entry.active { color: #c8bc7a; }
+</style>
+</head>
+<body>
+
+<h1>BACKROOMS — ACOUSTIC SURVEY</h1>
+<div class="subtitle">floor recordings · spatial hum synthesis · derived from game seed</div>
+
+<div class="floors" id="floorList"></div>
+
+<button class="render-all-btn" id="renderAllBtn" onclick="renderAll()">[ RENDER ALL FLOORS ]</button>
+
+<div class="log" id="log"></div>
+
+<script>
+// ─── SAME SEEDED RNG AS THE GAME ──────────────────────────────────────────
+function seededRandom(seed) {
+  let s = seed | 0;
+  s = Math.imul(s ^ (s >>> 16), 0x45d9f3b);
+  s = Math.imul(s ^ (s >>> 16), 0x45d9f3b);
+  s ^= s >>> 16;
+  return (s >>> 0) / 0xFFFFFFFF;
+}
+
+function floorSeed(masterSeed, floorN) {
+  let s = (masterSeed ^ (floorN * 2654435761)) | 0;
+  s = Math.imul(s ^ (s >>> 16), 0x45d9f3b);
+  s = Math.imul(s ^ (s >>> 16), 0x45d9f3b);
+  return (s >>> 0);
+}
+
+// ─── FLOOR DEFINITIONS ────────────────────────────────────────────────────
+// Each floor maps to a real game level with known acoustic properties
+const MASTER_SEED = 0; // canonical seed — change to match your game seed
+
+const FLOOR_H_MIN = 220;
+const FLOOR_H_MAX = 700;
+
+function getFloorHeight(floorN) {
+  const r = seededRandom(floorSeed(MASTER_SEED, floorN) ^ 0x1234abcd);
+  return (FLOOR_H_MIN + r * (FLOOR_H_MAX - FLOOR_H_MIN)) | 0;
+}
+
+const FLOORS = [
+  { floorN: 0,    label: 'LEVEL 0',    desc: 'Standard Level Zero — origin room' },
+  { floorN: -1,   label: 'LEVEL -1',   desc: 'One floor below origin' },
+  { floorN: -4,   label: 'LEVEL -4',   desc: 'Explored floor — shaft sighting reported' },
+  { floorN: -533, label: 'LEVEL -533', desc: 'Deep descent — no shafts found here' },
+  { floorN: 12,   label: 'LEVEL +12',  desc: 'Upper structure — thinner walls' },
+  { floorN: -1200,label: 'LEVEL -1200',desc: 'Extreme depth — pressure anomaly' },
+];
+
+// ─── ACOUSTIC PARAMETERS derived from floor seed (same math as game) ──────
+function getFloorAcoustics(floorN) {
+  const fs   = floorSeed(MASTER_SEED, floorN);
+  const h    = getFloorHeight(floorN);
+
+  // Ceiling height → reverb tail length (taller = longer)
+  const reverbDuration = 1.2 + (h / FLOOR_H_MAX) * 4.5;   // 1.2s → 5.7s
+  const reverbDecay    = 0.08 + (1 - h / FLOOR_H_MAX) * 0.25; // tight in low rooms
+
+  // Base hum frequency — slight per-floor drift from electrical variation
+  const humDrift   = (seededRandom(fs ^ 0xaabb1122) - 0.5) * 3.0; // ±1.5 Hz
+  const baseFreq   = 60 + humDrift;
+
+  // Harmonic structure — same as game but gains seeded per floor
+  const freqs  = [baseFreq, baseFreq*2, baseFreq*3, baseFreq*4, baseFreq*0.917, baseFreq*0.667];
+  const gains  = freqs.map((_, i) => {
+    const base = [0.18, 0.10, 0.07, 0.04, 0.09, 0.06][i];
+    const vary = (seededRandom((fs ^ (i * 0x12345678)) >>> 0) - 0.5) * 0.04;
+    return Math.max(0.01, base + vary);
+  });
+
+  // LFO — slow amplitude modulation, rate varies per floor
+  const lfoRate   = 0.05 + seededRandom(fs ^ 0xdeadbeef) * 0.08;
+  const lfoDepth  = 0.08 + seededRandom(fs ^ 0xcafebabe) * 0.10;
+
+  // Spatial drift — slight L/R phase offset, makes hum feel like it exists in space
+  const spatialRate  = 0.03 + seededRandom(fs ^ 0x11223344) * 0.04;
+  const spatialDepth = 0.15 + seededRandom(fs ^ 0x55667788) * 0.20;
+
+  // Electrical buzz — high-freq noise layer, more present in low ceilings
+  const buzzAmount = 0.012 + (1 - h / FLOOR_H_MAX) * 0.025;
+
+  // Sub-bass rumble — more present in deep floors
+  const depthFactor = Math.min(1, Math.abs(floorN) / 100);
+  const subRumble   = 0.008 + depthFactor * 0.035;
+  const subFreq     = 18 + seededRandom(fs ^ 0x99aabbcc) * 12;
+
+  // Reverb mix — tall rooms feel more open
+  const reverbMix = 0.25 + (h / FLOOR_H_MAX) * 0.55;
+
+  // Occasional flicker — random amplitude dip events
+  const flickerRate = 0.3 + seededRandom(fs ^ 0x13572468) * 0.8; // events per minute
+
+  return {
+    h, reverbDuration, reverbDecay,
+    freqs, gains, lfoRate, lfoDepth,
+    spatialRate, spatialDepth,
+    buzzAmount, subRumble, subFreq,
+    reverbMix, flickerRate
+  };
+}
+
+// ─── WAV ENCODER ──────────────────────────────────────────────────────────
+function audioBufferToWav(buffer) {
+  const numChannels = buffer.numberOfChannels;
+  const sampleRate  = buffer.sampleRate;
+  const format      = 1; // PCM
+  const bitDepth    = 16;
+  const bytesPerSample = bitDepth / 8;
+  const blockAlign  = numChannels * bytesPerSample;
+  const byteRate    = sampleRate * blockAlign;
+  const dataLength  = buffer.length * blockAlign;
+  const headerLength = 44;
+  const totalLength  = headerLength + dataLength;
+
+  const arrayBuffer = new ArrayBuffer(totalLength);
+  const view        = new DataView(arrayBuffer);
+
+  function writeStr(offset, str) {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  }
+  writeStr(0,  'RIFF');
+  view.setUint32(4,  totalLength - 8, true);
+  writeStr(8,  'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, format, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitDepth, true);
+  writeStr(36, 'data');
+  view.setUint32(40, dataLength, true);
+
+  let offset = 44;
+  for (let i = 0; i < buffer.length; i++) {
+    for (let ch = 0; ch < numChannels; ch++) {
+      const sample = Math.max(-1, Math.min(1, buffer.getChannelData(ch)[i]));
+      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+      offset += 2;
+    }
+  }
+  return arrayBuffer;
+}
+
+// ─── OFFLINE RENDERER ─────────────────────────────────────────────────────
+async function renderFloor(floorDef, durationSecs, onProgress) {
+  const SR      = 44100;
+  const ac      = new OfflineAudioContext(2, SR * durationSecs, SR);
+  const params  = getFloorAcoustics(floorDef.floorN);
+
+  // ── Master gain ──────────────────────────────────────────────────────────
+  const master = ac.createGain();
+  master.gain.value = 0.72;
+  master.connect(ac.destination);
+
+  // ── Reverb (IR convolution) ──────────────────────────────────────────────
+  const irLen = (SR * params.reverbDuration) | 0;
+  const irBuf = ac.createBuffer(2, irLen, SR);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = irBuf.getChannelData(ch);
+    for (let i = 0; i < irLen; i++) {
+      const t   = i / SR;
+      const env = Math.exp(-params.reverbDecay * t * 12);
+      d[i] = (Math.random() * 2 - 1) * env;
+      if (i === Math.floor(0.015 * SR)) d[i] += (Math.random() * 2 - 1) * 0.6;
+      if (i === Math.floor(0.030 * SR)) d[i] += (Math.random() * 2 - 1) * 0.4;
+      // Extra early reflection for tall rooms
+      if (params.h > 400 && i === Math.floor(0.065 * SR)) d[i] += (Math.random()*2-1)*0.3;
+    }
+  }
+  const reverb = ac.createConvolver();
+  reverb.buffer = irBuf;
+  const reverbGain = ac.createGain();
+  reverbGain.gain.value = params.reverbMix;
+  reverb.connect(reverbGain);
+  reverbGain.connect(master);
+
+  // ── Hum bus ──────────────────────────────────────────────────────────────
+  const humBus = ac.createGain();
+  humBus.gain.value = 0.55;
+  humBus.connect(master);
+  // Also feed into reverb
+  const humRevSend = ac.createGain();
+  humRevSend.gain.value = 0.3;
+  humBus.connect(humRevSend);
+  humRevSend.connect(reverb);
+
+  // ── Harmonic oscillators ──────────────────────────────────────────────────
+  // Split into L/R channels with slight phase offset for spatial feel
+  const splitter = ac.createChannelSplitter(2);
+  const merger   = ac.createChannelMerger(2);
+  merger.connect(humBus);
+
+  params.freqs.forEach((freq, i) => {
+    // Left channel oscillator
+    const oscL = ac.createOscillator();
+    oscL.type = 'sine';
+    oscL.frequency.value = freq;
+    oscL.detune.value = (Math.random() - 0.5) * 3;
+    const gL = ac.createGain();
+    gL.gain.value = params.gains[i];
+    oscL.connect(gL);
+    gL.connect(merger, 0, 0);
+    oscL.start(0);
+
+    // Right channel — very slightly detuned for spatial width
+    const oscR = ac.createOscillator();
+    oscR.type = 'sine';
+    oscR.frequency.value = freq;
+    oscR.detune.value = (Math.random() - 0.5) * 3 + (i % 2 === 0 ? 0.8 : -0.8);
+    const gR = ac.createGain();
+    gR.gain.value = params.gains[i];
+    oscR.connect(gR);
+    gR.connect(merger, 0, 1);
+    oscR.start(0);
+  });
+
+  // ── LFO amplitude modulation ──────────────────────────────────────────────
+  const lfo = ac.createOscillator();
+  lfo.frequency.value = params.lfoRate;
+  const lfoGain = ac.createGain();
+  lfoGain.gain.value = params.lfoDepth;
+  lfo.connect(lfoGain);
+  lfoGain.connect(humBus.gain);
+  lfo.start(0);
+
+  // ── Spatial panner LFO (slow L/R drift) ──────────────────────────────────
+  const pannerNode = ac.createStereoPanner();
+  pannerNode.pan.value = 0;
+  // Route hum through panner before bus
+  humBus.disconnect();
+  const humPrePan = ac.createGain();
+  humPrePan.gain.value = 1;
+
+  // Rebuild: oscs → merger → humPrePan → pannerNode → humBus → master/reverb
+  // (simpler: just modulate panner directly)
+  const panLFO = ac.createOscillator();
+  panLFO.frequency.value = params.spatialRate;
+  const panLFOGain = ac.createGain();
+  panLFOGain.gain.value = params.spatialDepth;
+  panLFO.connect(panLFOGain);
+  panLFOGain.connect(pannerNode.pan);
+  panLFO.start(0);
+
+  merger.disconnect();
+  merger.connect(pannerNode);
+  pannerNode.connect(humBus);
+
+  // Reconnect humBus to master + reverb send
+  humBus.connect(master);
+  humBus.connect(humRevSend);
+
+  // ── Electrical buzz (filtered noise) ──────────────────────────────────────
+  const buzzDuration = durationSecs;
+  const buzzSamples  = (SR * buzzDuration) | 0;
+  const buzzBuf = ac.createBuffer(1, buzzSamples, SR);
+  const buzzData = buzzBuf.getChannelData(0);
+  for (let i = 0; i < buzzSamples; i++) buzzData[i] = Math.random() * 2 - 1;
+  const buzzSrc = ac.createBufferSource();
+  buzzSrc.buffer = buzzBuf;
+  const buzzHPF = ac.createBiquadFilter();
+  buzzHPF.type = 'highpass';
+  buzzHPF.frequency.value = 3800;
+  buzzHPF.Q.value = 0.5;
+  const buzzLPF = ac.createBiquadFilter();
+  buzzLPF.type = 'lowpass';
+  buzzLPF.frequency.value = 8000;
+  const buzzGainNode = ac.createGain();
+  buzzGainNode.gain.value = params.buzzAmount;
+  buzzSrc.connect(buzzHPF);
+  buzzHPF.connect(buzzLPF);
+  buzzLPF.connect(buzzGainNode);
+  buzzGainNode.connect(master);
+  buzzGainNode.connect(reverb);
+  buzzSrc.start(0);
+
+  // ── Sub-bass rumble ────────────────────────────────────────────────────────
+  const subOsc = ac.createOscillator();
+  subOsc.type = 'sine';
+  subOsc.frequency.value = params.subFreq;
+  subOsc.detune.value = (Math.random() - 0.5) * 8;
+  const subGain = ac.createGain();
+  subGain.gain.value = params.subRumble;
+  // Slow sub modulation
+  const subLFO = ac.createOscillator();
+  subLFO.frequency.value = 0.03 + Math.random() * 0.04;
+  const subLFOGain = ac.createGain();
+  subLFOGain.gain.value = params.subRumble * 0.6;
+  subLFO.connect(subLFOGain);
+  subLFOGain.connect(subGain.gain);
+  subOsc.connect(subGain);
+  subGain.connect(master);
+  subGain.connect(reverb);
+  subOsc.start(0);
+  subLFO.start(0);
+
+  // ── Flicker events (random amplitude dips — lights fading) ────────────────
+  const flickersPerSec = params.flickerRate / 60;
+  let t = 2.0; // first flicker no earlier than 2s in
+  while (t < durationSecs - 1) {
+    const gap = (0.5 + Math.random() * (60 / params.flickerRate));
+    t += gap;
+    if (t >= durationSecs - 1) break;
+    // Dip duration: 0.05s–0.4s
+    const dipDur  = 0.05 + Math.random() * 0.35;
+    const dipAmt  = 0.3  + Math.random() * 0.5; // how much to reduce gain
+    humBus.gain.setValueAtTime(0.55, t);
+    humBus.gain.linearRampToValueAtTime(0.55 * (1 - dipAmt), t + 0.02);
+    humBus.gain.linearRampToValueAtTime(0.55, t + dipDur);
+  }
+
+  // ── Fade in / fade out ────────────────────────────────────────────────────
+  master.gain.setValueAtTime(0, 0);
+  master.gain.linearRampToValueAtTime(0.72, 4.0);
+  master.gain.setValueAtTime(0.72, durationSecs - 5.0);
+  master.gain.linearRampToValueAtTime(0, durationSecs);
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  // OfflineAudioContext doesn't have progress events natively,
+  // so we simulate progress via a timer
+  let progressInterval = null;
+  const startTime = Date.now();
+  progressInterval = setInterval(() => {
+    const elapsed = (Date.now() - startTime) / 1000;
+    const est = durationSecs * 0.08; // rough estimate of render time
+    onProgress(Math.min(0.95, elapsed / est));
+  }, 100);
+
+  const rendered = await ac.startRendering();
+  clearInterval(progressInterval);
+  onProgress(1.0);
+  return rendered;
+}
+
+// ─── UI BUILD ─────────────────────────────────────────────────────────────
+const floorList = document.getElementById('floorList');
+const logEl     = document.getElementById('log');
+
+function log(msg, active = false) {
+  const div = document.createElement('div');
+  div.className = 'entry' + (active ? ' active' : '');
+  div.textContent = '> ' + msg;
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+  return div;
+}
+
+FLOORS.forEach((floor, idx) => {
+  const params = getFloorAcoustics(floor.floorN);
+  const row    = document.createElement('div');
+  row.className = 'floor-row';
+  row.id = `row-${idx}`;
+
+  row.innerHTML = `
+    <div class="floor-label">${floor.label}</div>
+    <div class="floor-desc">
+      ${floor.desc}<br>
+      <span>ceiling: ${params.h}u · reverb: ${params.reverbDuration.toFixed(1)}s · buzz: ${params.h < 400 ? 'high' : 'low'}</span>
+    </div>
+    <select class="duration-select" id="dur-${idx}">
+      <option value="60">1 min</option>
+      <option value="300">5 min</option>
+      <option value="600" selected>10 min</option>
+      <option value="1800">30 min</option>
+      <option value="3600">1 hour</option>
+    </select>
+    <div style="display:flex;gap:6px;flex-direction:column">
+      <button class="render-btn" id="btn-${idx}" onclick="renderOne(${idx})">[ RENDER WAV ]</button>
+      <button class="render-btn" id="play-${idx}" onclick="previewOne(${idx})">[ ▶ PREVIEW ]</button>
+    </div>
+    <div class="progress-bar" id="prog-${idx}"><div class="progress-fill" id="fill-${idx}"></div></div>
+    <audio id="audio-${idx}" controls style="display:none;grid-column:1/-1;width:100%;height:28px;margin-top:4px;filter:invert(0.85) sepia(1) hue-rotate(10deg);"></audio>
+  `;
+  floorList.appendChild(row);
+});
+
+// ─── PREVIEW ONE (30s rendered inline) ────────────────────────────────────
+async function previewOne(idx) {
+  if (isRendering) return;
+  isRendering = true;
+
+  const floor   = FLOORS[idx];
+  const playBtn = document.getElementById(`play-${idx}`);
+  const row     = document.getElementById(`row-${idx}`);
+  const progBar = document.getElementById(`prog-${idx}`);
+  const fill    = document.getElementById(`fill-${idx}`);
+  const audioEl = document.getElementById(`audio-${idx}`);
+
+  playBtn.disabled = true;
+  playBtn.textContent = '[ RENDERING... ]';
+  row.classList.add('rendering');
+  progBar.classList.add('visible');
+
+  const entry = log(`previewing ${floor.label} — 30s · ceiling ${getFloorAcoustics(floor.floorN).h}u`, true);
+
+  const rendered = await renderFloor(floor, 30, (p) => {
+    fill.style.width = (p * 100).toFixed(1) + '%';
+  });
+
+  const wav  = audioBufferToWav(rendered);
+  const blob = new Blob([wav], { type: 'audio/wav' });
+  const url  = URL.createObjectURL(blob);
+
+  audioEl.src = url;
+  audioEl.style.display = 'block';
+  audioEl.play();
+
+  entry.classList.remove('active');
+  log(`▶ playing ${floor.label} preview`);
+
+  playBtn.textContent = '[ ▶ PREVIEW ]';
+  playBtn.disabled = false;
+  row.classList.remove('rendering');
+
+  isRendering = false;
+}
+
+// ─── RENDER ONE ───────────────────────────────────────────────────────────
+let isRendering = false;
+
+async function renderOne(idx) {
+  if (isRendering) return;
+  isRendering = true;
+
+  const floor   = FLOORS[idx];
+  const dur     = parseInt(document.getElementById(`dur-${idx}`).value);
+  const btn     = document.getElementById(`btn-${idx}`);
+  const row     = document.getElementById(`row-${idx}`);
+  const progBar = document.getElementById(`prog-${idx}`);
+  const fill    = document.getElementById(`fill-${idx}`);
+
+  btn.disabled = true;
+  btn.textContent = '[ RENDERING... ]';
+  row.classList.add('rendering');
+  progBar.classList.add('visible');
+
+  const entry = log(`rendering ${floor.label} — ${dur}s · ceiling ${getFloorAcoustics(floor.floorN).h}u`, true);
+
+  const rendered = await renderFloor(floor, dur, (p) => {
+    fill.style.width = (p * 100).toFixed(1) + '%';
+  });
+
+  // Encode to WAV
+  log(`encoding WAV · ${rendered.length} samples · ${rendered.numberOfChannels}ch`);
+  const wav  = audioBufferToWav(rendered);
+  const blob = new Blob([wav], { type: 'audio/wav' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  const filename = `backrooms_${floor.label.replace(' ', '_').replace('+','plus')}_${dur}s.wav`;
+  a.href     = url;
+  a.download = filename;
+  a.click();
+
+  entry.classList.remove('active');
+  log(`✓ saved: ${filename}`);
+
+  btn.textContent = '[ DONE ✓ ]';
+  btn.classList.add('done');
+  row.classList.remove('rendering');
+  row.classList.add('done');
+
+  isRendering = false;
+}
+
+// ─── RENDER ALL ───────────────────────────────────────────────────────────
+async function renderAll() {
+  const allBtn = document.getElementById('renderAllBtn');
+  allBtn.disabled = true;
+  log('— beginning full acoustic survey —');
+  for (let i = 0; i < FLOORS.length; i++) {
+    await renderOne(i);
+    await new Promise(r => setTimeout(r, 200));
+  }
+  log('— survey complete —');
+}
+</script>
+
+</body>
+</html>
